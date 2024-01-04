@@ -208,9 +208,8 @@ rf_y_pred = best_rf.predict(X_test)
 rf_accuracy = accuracy_score(y_test, rf_y_pred)
 print("RF Accuracy:", round(rf_accuracy,2))
 
-#%% Classify imageery and plot results
-predictions = [gnb, knn, svc, best_rf]
-counts_all = []
+#%%
+reshaped_imgs = []
 
 for j in range(len(Raster_img)):
 
@@ -218,48 +217,71 @@ for j in range(len(Raster_img)):
         img = src.read()
     reshaped_img = reshape_as_image(img)
     
+    reshaped_imgs.append(reshaped_img)
+    
+#%%
+def color_stretch(image, index):
+    colors = image[:, :, index].astype(np.float64)
+    for b in range(colors.shape[2]):
+        colors[:, :, b] = rio.plot.adjust_band(colors[:, :, b])
+    return colors
+    
+# find the highest pixel value in the prediction image
+n = 3
+
+# next setup a colormap for our map
+colors = dict((
+    (0, (244, 164, 96, 255)),   # Tan - foam
+    (1, (48, 156, 214, 255)),   # Blue - Water
+    (2, (96, 19, 134, 255)),    # Purple - Emergent Wetland
+    (3, (139,69,19, 255)),      # Brown - WetSand
+))
+
+# Put 0 - 255 as float 0 - 1
+for k in colors:
+    v = colors[k]
+    _v = [_v / 255.0 for _v in v]
+    colors[k] = _v
+    
+index_colors = [colors[key] if key in colors else 
+                (255, 255, 255, 0) for key in range(0, n+1)]
+
+cmap = plt.matplotlib.colors.ListedColormap(index_colors, 'Classification', n+1)
+
+accuracy_scores = [gnb_accuracy, knn_accuracy, svc_accuracy, rf_accuracy]
+
+#%% Classify imageery and plot results
+predictions = [gnb, knn, svc, best_rf]
+prediction_name = ['gnb', 'knn', 'svc', 'best_rf']
+
+counts_all = []
+
+for j in range(len(reshaped_imgs)):
+    reshaped_img = reshaped_imgs[j]
+    discharge_value = Discharge_cfps[j]
+    
     prediction = []
     counts_list = []
-    counts_all.append(counts_list)
-
+    
     for i in range(len(predictions)):
         class_prediction = predictions[i].predict(reshaped_img.reshape(-1, 4))
         reshape_prediction = class_prediction.reshape(reshaped_img[:, :, 0].shape)
         int_prediction = str_class_to_int(reshape_prediction)
         prediction.append(int_prediction)
-
-    def color_stretch(image, index):
-        colors = image[:, :, index].astype(np.float64)
-        for b in range(colors.shape[2]):
-            colors[:, :, b] = rio.plot.adjust_band(colors[:, :, b])
-        return colors
         
-    # find the highest pixel value in the prediction image
-    n = 3
+        counts = np.unique(int_prediction, return_counts=True)
+        counts_df = pd.DataFrame(counts).transpose()
+        counts_df.columns = ['LC_code', 'ncells']
+        counts_df['area_m2'] = counts_df['ncells'] * (3*3)
+        counts_df['discharge'] = discharge_value
+        counts_df['method'] = prediction_name[i]
+        counts_list.append(counts_df)
     
-    # next setup a colormap for our map
-    colors = dict((
-        (0, (244, 164, 96, 255)),   # Tan - foam
-        (1, (48, 156, 214, 255)),   # Blue - Water
-        (2, (96, 19, 134, 255)),    # Purple - Emergent Wetland
-        (3, (139,69,19, 255)),      # Brown - WetSand
-    ))
-    
-    # Put 0 - 255 as float 0 - 1
-    for k in colors:
-        v = colors[k]
-        _v = [_v / 255.0 for _v in v]
-        colors[k] = _v
-        
-    index_colors = [colors[key] if key in colors else 
-                    (255, 255, 255, 0) for key in range(0, n+1)]
-    
-    cmap = plt.matplotlib.colors.ListedColormap(index_colors, 'Classification', n+1)
-
-    accuracy_scores = [gnb_accuracy, knn_accuracy, svc_accuracy, rf_accuracy]
+    counts_df_merge = pd.concat(counts_list)
+    counts_all.append(counts_df_merge)
     
     fig, axs = plt.subplots(2,2,figsize=(10,7))
-    axs[0,0].imshow(prediction[0], cmap=cmap, interpolation='none')
+    axs[0,0].imshow(prediction[1], cmap=cmap, interpolation='none')
     axs[0,0].set_title("GNB, Accuracy:" + str(round(accuracy_scores[0],2)))
     
     axs[0,1].imshow(prediction[1], cmap=cmap, interpolation='none')
@@ -280,31 +302,9 @@ for j in range(len(Raster_img)):
     colours = im.cmap(im.norm(np.unique(prediction[1])))
     plt.close()
 
-#%%
-prediction_name = ['gnb', 'knn', 'svc', 'best_rf']
-
-counts_list = []
-for i in range(len(prediction)):
-    counts = np.unique(prediction[i], return_counts=True)
-    counts_df = pd.DataFrame(counts).transpose()
-    counts_df.columns = ['LC_code', 'ncells']
-    counts_df['area_m2'] = counts_df['ncells'] * (3*3)
-    counts_df['discharge'] = Discharge_cfps[1]
-    counts_df['method'] = prediction_name[i]
-    counts_list.append(counts_df)
-#%% generate counts of pixels in each LC class
-prediction_name = ['gnb', 'knn', 'svc', 'best_rf']
-
-count_df1 = []
-for i in range(len(counts_all)):
-    
-    count_df = counts_all[i]
-    count_df = count_df[0]
-    count_df1.append(count_df)
-
-Counts_df = pd.concat(count_df1)
-
 #%% Summarize pixel land cover type from unsupervised alg (change if n clusters h=change, works for 6 classes)
+Counts_df = pd.concat(counts_all)
+
 conditions = [
     (Counts_df['LC_code'] == 0), #nan
     (Counts_df['LC_code'] == 1), #shallow water
@@ -315,21 +315,27 @@ conditions = [
 values = ['Foam', 'Water', 'Forest', 'Urban']
 Counts_df['LC_class'] = np.select(conditions, values)
 
-Counts_df.to_csv(Out + "\\Supervised_LC_counts.csv", index=False)
-
+for i in range(len(prediction_name)):
+    Counts_df_type = Counts_df.loc[Counts_df["method"] == prediction_name[i]]
+    Counts_df_type.to_csv(Out + "\\Supervised_LC_counts_" + prediction_name[i] + ".csv", index=False)
+    
 #%% Plot discharge vs foam area
-Class = list(set(Counts_df['LC_code'].values.tolist()))
+Method = list(set(Counts_df['method'].values.tolist()))
 Counts_df = Counts_df.reset_index()
-Counts_df = Counts_df.drop(['index'], axis=1)
+Foam_df = Counts_df[Counts_df['LC_code'] == 0]
+groups = Foam_df.groupby('method')
+labels = np.random.choice(prediction_name, 20)
 
-for i in range(len(Class)):
-    Class_df = Counts_df[Counts_df['LC_code'] == Class[i]]
-    plt.plot(Class_df['discharge'], Class_df['area_m2'], marker='o', color = colours[i])
+fig, ax = plt.subplots()
+ax.margins(0.05) 
+for name, group in groups:
+    ax.plot(group.discharge, group.area_m2, marker='o', linestyle='', ms=8, label=name)
+ax.legend()
 
-plt.ylim(0, 40000)
+plt.ylim(0, 50000)
 plt.xlabel('Discharge [cfps]')
 plt.ylabel('Foam area [m2]')
 plt.title('Area of Land Cover Type at ' + Loc + ' Dam at Varying Discharge Levels\nSupervised Classifier')
-plt.savefig(Out + "\\" + Loc + "_Land_Cover_Type_Area.png")
 
+plt.savefig(Out + "\\" + Loc + "_Land_Cover_Type_Area.png")
 plt.show()

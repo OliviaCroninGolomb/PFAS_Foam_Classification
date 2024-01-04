@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 #%%Parameters
-Loc = "LD1"
+Loc = "WOH"
 Type = "Stats"
 fp = r"C:\\Users\\OCRONING\\OneDrive - Environmental Protection Agency (EPA)\\Profile\\Documents\\PFAS_Foam\\"
 In = fp + r"Inputs\\"

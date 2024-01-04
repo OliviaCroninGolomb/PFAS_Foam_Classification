@@ -13,7 +13,7 @@ from rasterio.plot import reshape_as_image
 
 #%% Parameters
 Loc = "LD1"
-Type = "Stats"
+Type = "Eqint"
 fp = r"C:\\Users\\OCRONING\\OneDrive - Environmental Protection Agency (EPA)\\Profile\\Documents\\PFAS_Foam\\"
 In = fp + r"Inputs\\"
 Out = fp + "Outputs\\" + Loc + "\\" + Type + "\\Unsupervised\\"
