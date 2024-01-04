@@ -10,6 +10,8 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from sklearn.cluster import KMeans
 from rasterio.plot import reshape_as_image
+import geopandas as gpd
+import math
 
 #%% Parameters
 Loc = "LD1"
@@ -64,8 +66,7 @@ Discharge_dates = pd.concat(Discharge_meta)
 Discharge_cfps = Discharge_dates['Actual_discharge'].tolist()
 
 #%% Create unsupervised classification with kmeans
-
-with rio.open(River_Clip_path + Raster_name[4]) as src:
+with rio.open(River_Clip_path + Raster_name[1]) as src:
     img = src.read()
     
 # Take our full image and reshape into long 2d array (nrow * ncol, nband) for classification
@@ -74,22 +75,44 @@ bands, rows, cols = img.shape
     
 k = 6 # num of clusters
     
-kmeans_predictions = KMeans(n_clusters=k, random_state=0).fit(reshaped_img.reshape(-1, 4))
+kmeans_predictions = KMeans(n_clusters=k, random_state=0)
+kmeans_predictions.fit(reshaped_img.reshape(-1, 4))
 kmeans_predictions_2d = kmeans_predictions.labels_.reshape(rows, cols)
 
-#%% Apply classification schema to rest of imagery and plot results
-counts_list = []
+fig, axs = plt.subplots(nrows = 1, ncols = 1, figsize=(10,7))
+plt.imshow(kmeans_predictions_2d)
+plt.title('Discharge: ' + str(Discharge_cfps[4]) + " cfps; k = " + str(k) , fontsize=15, y = 1)
+plt.show()
 
+im = plt.imshow(kmeans_predictions_2d)
+colours = im.cmap(im.norm(np.unique(kmeans_predictions_2d)))
+plt.close()
+
+#%% Plot clusters
+X = reshaped_img.reshape(-1, 4)
+y_kmeans = kmeans_predictions.predict(reshaped_img.reshape(-1, 4))
+
+plt.scatter(X[:, 0], X[:, 1], c=y_kmeans, s=50, cmap='viridis')
+centers = kmeans_predictions.cluster_centers_
+plt.scatter(centers[:, 0], centers[:, 1], c='black', s=200, alpha=0.5);
+plt.title('KMeans Clusters\nDischarge: ' + str(Discharge_cfps[4]) + " cfps; k = " + str(k) , fontsize=15, y = 1)
+    
+#%% Classify Rasters
 for i in range(len(Raster_img)):
     
-    with rio.open(River_Clip_path + Raster_name[i]) as src: img = src.read()
+    with rio.open(River_Clip_path + Raster_name[i]) as src: 
+        img = src.read()
         
     # Take our full image and reshape into long 2d array (nrow * ncol, nband) for classification
     reshaped_img = reshape_as_image(img)
     bands, rows, cols = img.shape
-                
-    kmeans_predict = kmeans_predictions.predict(reshaped_img.reshape(-1, 4))
-    kmeans_predictions_2d = kmeans_predict.reshape(rows, cols)
+    
+    kmeans_predictions = KMeans(n_clusters=k, random_state=0)
+    kmeans_predictions.fit(reshaped_img.reshape(-1, 4))
+    kmeans_predictions_2d = kmeans_predictions.labels_.reshape(rows, cols)
+       
+    #kmeans_predict = kmeans_predictions.predict(reshaped_img.reshape(-1, 4))
+    #kmeans_predictions_2d = kmeans_predict.reshape(rows, cols)
     
     #Plot classified raster
     fig, axs = plt.subplots(nrows = 1, ncols = 1, figsize=(10,7))
@@ -98,52 +121,55 @@ for i in range(len(Raster_img)):
     plt.savefig(Out + "\\" + Loc + "_d" + str(Discharge_cfps[i]) + "_" + str(k) + "kmeans_classify.png")
     plt.show()
     
-    im = plt.imshow(kmeans_predictions_2d)
-    colours = im.cmap(im.norm(np.unique(kmeans_predictions_2d)))
-    plt.close()
-                  
     #Export classified raster
-    with rio.open(In + 'SkySat_Imagery\\' + Loc + '\\' + Loc + '_Unsupervised\\' + Loc + "_d" + str(Discharge_cfps[i]) + '_kmeans.tif', 'w', **kwargs) as dst:
+    with rio.open(In + 'SkySat_Imagery\\' + Loc + '\\' + Loc + '_Unsupervised\\' + Type + "\\" + Loc + "_d" + str(Discharge_cfps[i]) + '_kmeans.tif', 'w', **kwargs) as dst:
             dst.write_band(1, kmeans_predictions_2d.astype(rio.float32))
+
+#%% Extract foam area
+Class_fp = In + 'SkySat_Imagery\\' + Loc + '\\' + Loc + '_Unsupervised\\' + Type + "\\"
+Ras_Class = [file for file in os.listdir(Class_fp)if file.endswith(".tif")]
+pointData = gpd.read_file(In + "Shapefiles\\Land_Cover_Training\\" + Loc + "\\Foam_Point.shp")
+
+foam_list = []
+
+for i in range(len(Ras_Class)):  
+
+    Class_img = rio.open(Class_fp + Ras_Class[i])
     
-    #Get pixel counts of each land cover type
-    counts = np. unique(kmeans_predictions_2d, return_counts=True)
+    for point in pointData['geometry']:
+        x = point.xy[0][0]
+        y = point.xy[1][0]
+        row, col = Class_img.index(x,y)
+        foam_value = Class_img.read(1)[row,col]
+    
+    with rio.open(Class_fp + Ras_Class[i]) as src: 
+         img = src.read()
+         
+    reshaped_img = reshape_as_image(img)
+    bands, rows, cols = img.shape
+    
+    counts = np.unique(reshaped_img, return_counts=True)
     counts_df = pd.DataFrame(counts).transpose()
     counts_df.columns = ['LC_code', 'ncells']
     counts_df['area_m2'] = counts_df['ncells'] * (3*3)
     counts_df['discharge'] = Discharge_cfps[i]
-    counts_list.append(counts_df)
+    
+    foam_df = counts_df[counts_df['LC_code'] == foam_value] 
+    foam_list.append(foam_df)
 
-Counts_df = pd.concat(counts_list)
-
-#%% Summarize pixel land cover type from unsupervised alg (change if n clusters h=change, works for 6 classes)
-conditions = [
-    (Counts_df['LC_code'] == 0), #nan
-    (Counts_df['LC_code'] == 1), #shallow water
-    (Counts_df['LC_code'] == 2), #forest 
-    (Counts_df['LC_code'] == 3), #foam
-    (Counts_df['LC_code'] == 4), #water
-    (Counts_df['LC_code'] == 5), #forest edge
-]
-
-values = ['a', 'b', 'c', 'd', 'e', 'f']
-Counts_df['LC_class'] = np.select(conditions, values)
-
-Counts_df.to_csv(Out + "\\Unsupervised_LC_counts.csv", index=False)
+Foam_df = pd.concat(foam_list)
+Foam_df.to_csv(Out + "\\Unsupervised_Foam_Counts.csv", index=False)
 
 #%% Plot discharge vs foam area
-Class = list(set(Counts_df['LC_code'].values.tolist()))
-Counts_df = Counts_df.reset_index()
-Counts_df = Counts_df.drop(['index'], axis=1)
+max_ylim = max(Foam_df['area_m2'])
+max_ylim = math.ceil(max_ylim/10000)*10000
 
-for i in range(len(Class)):
-    Class_df = Counts_df[Counts_df['LC_code'] == Class[i]]
-    plt.plot(Class_df['discharge'], Class_df['area_m2'], marker='o', color = colours[i])
+plt.scatter(Foam_df.discharge, Foam_df.area_m2)
 
-plt.ylim(0, 40000)
+plt.ylim(0, max_ylim)
 plt.xlabel('Discharge [cfps]')
 plt.ylabel('Foam area [m2]')
-plt.title('Area of Land Cover Type at ' + Loc + ' Dam at Varying Discharge Levels\nUnsupervised Classifier')
-plt.savefig(Out + "\\" + Loc + "_Land_Cover_Type_Area.png")
+plt.title('Foam Area at ' + Loc + ' Dam at Varying Discharge Levels\nSupervised Classifier')
 
+plt.savefig(Out + "\\" + Loc + "_Foam_Area.png")
 plt.show()

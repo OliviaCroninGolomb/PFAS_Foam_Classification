@@ -15,7 +15,7 @@ from rasterio.plot import reshape_as_image
 
 #%% Parameters
 Loc = "LD1"
-Type = "Stats"
+Type = "Eqint"
 fp = r"C:\\Users\\OCRONING\\OneDrive - Environmental Protection Agency (EPA)\\Profile\\Documents\\PFAS_Foam\\"
 In = fp + r"Inputs\\"
 Out = fp + "Outputs\\" + Loc + "\\" + Type + "\\Supervised\\"
@@ -335,7 +335,7 @@ ax.legend()
 plt.ylim(0, 50000)
 plt.xlabel('Discharge [cfps]')
 plt.ylabel('Foam area [m2]')
-plt.title('Area of Land Cover Type at ' + Loc + ' Dam at Varying Discharge Levels\nSupervised Classifier')
+plt.title('Foam Area at ' + Loc + ' Dam at Varying Discharge Levels\nSupervised Classifier')
 
 plt.savefig(Out + "\\" + Loc + "_Land_Cover_Type_Area.png")
 plt.show()

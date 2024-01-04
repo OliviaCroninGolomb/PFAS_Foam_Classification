@@ -56,7 +56,7 @@ date_range_filter = {
   "field_name": "acquired",
   "config": {
     "gte": Start_year + "-" + Start_month + "-01T00:00:00.000Z",
-    "lte": End_year + "-" + End_month + "-18T00:00:00.000Z"
+    "lte": "2024" + "-" + "01" + "-31T00:00:00.000Z"
   }
 }
 
